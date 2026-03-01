@@ -163,6 +163,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
             if (syncRes.ok) {
               console.log("[Auth] Google tokens synced successfully.");
+              // Force profile refresh to update UI state
+              fetchProfile(session.user.id);
             } else {
               console.error("[Auth] Failed to sync Google tokens:", await syncRes.text());
             }
