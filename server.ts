@@ -57,7 +57,11 @@ const getOAuth2Client = (redirectUri?: string) => {
   const appUrl = sanitizeEnv(process.env.APP_URL);
 
   if (!clientId || !clientSecret || !appUrl) {
-    console.warn("MISSING GOOGLE OAUTH CREDENTIALS or APP_URL.");
+    console.warn("MISSING GOOGLE OAUTH CREDENTIALS or APP_URL.", { 
+      hasClientId: !!clientId, 
+      hasClientSecret: !!clientSecret, 
+      appUrl 
+    });
   }
 
   return new google.auth.OAuth2(
@@ -191,12 +195,16 @@ app.post("/api/auth/sync-google", async (req, res) => {
     
     // Also update session for immediate use
     if (provider_token) {
-      req.session!.tokens = {
-        access_token: provider_token,
-        refresh_token: provider_refresh_token || req.session!.tokens?.refresh_token,
-        token_type: "Bearer",
-        expiry_date: Date.now() + 3600 * 1000 // Assume 1 hour
-      };
+      if (!req.session) {
+        console.warn("[SYNC] req.session is missing, cannot store tokens in session.");
+      } else {
+        req.session.tokens = {
+          access_token: provider_token,
+          refresh_token: provider_refresh_token || req.session.tokens?.refresh_token,
+          token_type: "Bearer",
+          expiry_date: Date.now() + 3600 * 1000 // Assume 1 hour
+        };
+      }
     }
     console.log("[SYNC] Tokens synced successfully.");
 
