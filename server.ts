@@ -174,6 +174,8 @@ app.post("/api/auth/sync-google", async (req, res) => {
     const { provider_token, provider_refresh_token } = req.body;
 
     const updateData: any = {
+      id: user.id,
+      email: user.email,
       google_email: user.email,
       google_id: user.identities?.find(i => i.provider === 'google')?.id || user.id
     };
@@ -185,11 +187,10 @@ app.post("/api/auth/sync-google", async (req, res) => {
 
     const { error } = await supabase
       .from("users")
-      .update(updateData)
-      .eq("id", user.id);
+      .upsert(updateData, { onConflict: 'id' });
     
     if (error) {
-      console.error("[SYNC] Error updating tokens in Supabase:", error);
+      console.error("[SYNC] Error upserting tokens in Supabase:", error);
       throw error;
     }
     
