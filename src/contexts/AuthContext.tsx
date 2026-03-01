@@ -119,9 +119,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }, 5000);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
+        // If we have provider tokens, sync them to the server
+        if (event === 'SIGNED_IN' && session.provider_token) {
+          try {
+            await fetch('/api/auth/sync-google', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+              },
+              body: JSON.stringify({
+                provider_token: session.provider_token,
+                provider_refresh_token: session.provider_refresh_token
+              })
+            });
+          } catch (err) {
+            console.error('Error syncing Google tokens:', err);
+          }
+        }
         fetchProfile(session.user.id);
       }
       else setProfile(null);
@@ -157,6 +175,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       provider: 'google',
       options: {
         redirectTo: window.location.origin,
+        scopes: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/documents.readonly https://www.googleapis.com/auth/gmail.modify',
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        }
       }
     });
   };
