@@ -103,9 +103,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Check active sessions and subscribe to auth changes
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
+        // Sync tokens if present on initial load
+        if (session.provider_token) {
+          console.log("[Auth] Syncing Google tokens from initial session...");
+          try {
+            await fetch('/api/auth/sync-google', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+              },
+              body: JSON.stringify({
+                provider_token: session.provider_token,
+                provider_refresh_token: session.provider_refresh_token
+              })
+            });
+          } catch (err) {
+            console.error('[Auth] Error syncing Google tokens on load:', err);
+          }
+        }
         fetchProfile(session.user.id);
       }
       setLoading(false);
@@ -120,12 +139,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 5000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log(`[Auth] Auth state change: ${event}`, { 
+        hasUser: !!session?.user, 
+        hasProviderToken: !!session?.provider_token,
+        hasProviderRefreshToken: !!session?.provider_refresh_token 
+      });
       setUser(session?.user ?? null);
       if (session?.user) {
         // If we have provider tokens, sync them to the server
         if (event === 'SIGNED_IN' && session.provider_token) {
+          console.log("[Auth] Syncing Google tokens to server...");
           try {
-            await fetch('/api/auth/sync-google', {
+            const syncRes = await fetch('/api/auth/sync-google', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -136,8 +161,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 provider_refresh_token: session.provider_refresh_token
               })
             });
+            if (syncRes.ok) {
+              console.log("[Auth] Google tokens synced successfully.");
+            } else {
+              console.error("[Auth] Failed to sync Google tokens:", await syncRes.text());
+            }
           } catch (err) {
-            console.error('Error syncing Google tokens:', err);
+            console.error('[Auth] Error syncing Google tokens:', err);
           }
         }
         fetchProfile(session.user.id);
@@ -170,8 +200,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id]);
 
   const loginWithGoogle = async () => {
+    console.log("[Auth] Initiating Google login with Supabase...");
     // This is for primary login via Supabase Google Auth
-    await supabase.auth.signInWithOAuth({
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: window.location.origin,
@@ -182,14 +213,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
+    if (error) {
+      console.error("[Auth] Error in signInWithOAuth:", error);
+      alert(`Erro ao iniciar login: ${error.message}`);
+    } else {
+      console.log("[Auth] signInWithOAuth initiated successfully:", data);
+    }
   };
 
   const connectGoogle = async () => {
-    if (!user) return;
-    // This is for the custom integration flow
-    const res = await fetch(`/api/auth/url?userId=${user.id}`);
-    const { url } = await res.json();
-    window.open(url, 'google_auth', 'width=600,height=700');
+    // We use the same flow as loginWithGoogle because it now includes all necessary scopes
+    // and our onAuthStateChange handler will sync the tokens automatically.
+    await loginWithGoogle();
   };
 
   const disconnectGoogle = async () => {
