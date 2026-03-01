@@ -155,6 +155,58 @@ app.get("/api/profile", async (req, res) => {
 
 // --- Auth Routes ---
 
+app.post("/api/auth/sync-google", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: "No authorization header" });
+
+  try {
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const { provider_token, provider_refresh_token } = req.body;
+
+    const updateData: any = {
+      google_email: user.email,
+      google_id: user.identities?.find(i => i.provider === 'google')?.id || user.id
+    };
+
+    if (provider_refresh_token) {
+      console.log(`[SYNC] Syncing Google refresh token for user: ${user.id}`);
+      updateData.google_refresh_token = provider_refresh_token;
+    }
+
+    const { error } = await supabase
+      .from("users")
+      .update(updateData)
+      .eq("id", user.id);
+    
+    if (error) {
+      console.error("[SYNC] Error updating tokens in Supabase:", error);
+      throw error;
+    }
+    
+    // Also update session for immediate use
+    if (provider_token) {
+      req.session!.tokens = {
+        access_token: provider_token,
+        refresh_token: provider_refresh_token || req.session!.tokens?.refresh_token,
+        token_type: "Bearer",
+        expiry_date: Date.now() + 3600 * 1000 // Assume 1 hour
+      };
+    }
+    console.log("[SYNC] Tokens synced successfully.");
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error in /api/auth/sync-google:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/auth/logout", (req, res) => {
   console.log("Logging out user, clearing session.");
   req.session = null;
