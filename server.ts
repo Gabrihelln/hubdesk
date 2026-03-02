@@ -747,10 +747,28 @@ app.get("/api/google/calendar", async (req, res) => {
     client.setCredentials({ refresh_token: data.google_refresh_token });
     
     const calendar = google.calendar({ version: "v3", auth: client });
+    
+    const now = new Date();
+    let timeMin = now.toISOString();
+    let timeMax = undefined;
+
+    if (req.query.today === 'true') {
+      // Start of today to end of today
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      timeMin = startOfDay.toISOString();
+      timeMax = endOfDay.toISOString();
+    } else {
+      // Default: from now to 30 days in the future for the calendar view
+      const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      timeMax = thirtyDaysLater.toISOString();
+    }
+
     const response: any = await calendar.events.list({
       calendarId: "primary",
-      timeMin: new Date().toISOString(),
-      maxResults: 20,
+      timeMin,
+      timeMax,
+      maxResults: 100,
       singleEvents: true,
       orderBy: "startTime",
       conferenceDataVersion: 1
