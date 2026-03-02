@@ -749,8 +749,8 @@ app.get("/api/google/calendar", async (req, res) => {
     const calendar = google.calendar({ version: "v3", auth: client });
     
     const now = new Date();
-    let timeMin = now.toISOString();
-    let timeMax = undefined;
+    let timeMin = req.query.timeMin as string || now.toISOString();
+    let timeMax = req.query.timeMax as string || undefined;
 
     if (req.query.today === 'true') {
       // Start of today to end of today
@@ -758,8 +758,8 @@ app.get("/api/google/calendar", async (req, res) => {
       const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
       timeMin = startOfDay.toISOString();
       timeMax = endOfDay.toISOString();
-    } else {
-      // Default: from now to 30 days in the future for the calendar view
+    } else if (!req.query.timeMin) {
+      // Default: from now to 30 days in the future for the calendar view if no range provided
       const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       timeMax = thirtyDaysLater.toISOString();
     }
