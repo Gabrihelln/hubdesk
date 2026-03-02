@@ -285,7 +285,7 @@ export default function Dashboard() {
 
       if (profile?.google_connected) {
         const [calRes, mailRes, driveRes] = await Promise.all([
-          fetch('/api/google/calendar', { headers }),
+          fetch('/api/google/calendar?today=true', { headers }),
           fetch('/api/google/gmail', { headers }),
           fetch('/api/google/drive', { headers })
         ]);
