@@ -358,25 +358,18 @@ export default function Dashboard() {
     fetchData();
   }, [fetchData]);
 
+  const upcomingEvents = events.filter(event => {
+    const end = new Date(event.end?.dateTime || event.end?.date).getTime();
+    return end > currentTime.getTime();
+  });
+
   useEffect(() => {
-    if (events.length > 0) {
-      // The user wants to see events/meetings from their Google Calendar
-      // We'll consider all upcoming events as potential "conferences"
-      const now = currentTime.getTime();
-      const upcomingEvents = events.filter(event => {
-        const end = new Date(event.end?.dateTime || event.end?.date).getTime();
-        return end > now;
-      });
-      
-      if (upcomingEvents.length > 0) {
-        setNextConference(upcomingEvents[0]);
-      } else {
-        setNextConference(null);
-      }
+    if (upcomingEvents.length > 0) {
+      setNextConference(upcomingEvents[0]);
     } else {
       setNextConference(null);
     }
-  }, [events, currentTime]);
+  }, [upcomingEvents]);
 
   useEffect(() => {
     if (!nextConference) return;
@@ -834,7 +827,7 @@ export default function Dashboard() {
         </h1>
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3 mt-6 text-sm font-semibold text-slate-500 dark:text-slate-400">
           <span className="flex items-center gap-2">Hoje você tem :</span>
-          <span className="flex items-center gap-2"><CalendarIcon className="w-4 h-4 text-blue-500" /> <span className="text-slate-700 dark:text-slate-200 font-bold">{events.length} reuniões</span> para hoje</span>
+          <span className="flex items-center gap-2"><CalendarIcon className="w-4 h-4 text-blue-500" /> <span className="text-slate-700 dark:text-slate-200 font-bold">{upcomingEvents.length} reuniões</span> para hoje</span>
           {/* <span className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-500" /> <span className="text-slate-700 dark:text-slate-200 font-bold">1 conferência</span> para participar</span> */}
           <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-blue-500" /> <span className="text-slate-700 dark:text-slate-200 font-bold">{tasks.filter(t => !t.completed).length} tarefas</span> para completar</span>
           <span className="flex items-center gap-2"><Mail className="w-4 h-4 text-blue-500" /> <span className="text-slate-700 dark:text-slate-200 font-bold">{emails.length} mensagens</span> para ler</span>
@@ -871,7 +864,7 @@ export default function Dashboard() {
           </div>
           <div className="flex-1 px-6 pb-6 overflow-y-auto space-y-8">
             {profile?.google_connected ? (
-              events.length > 0 ? events.map((event, i) => (
+              upcomingEvents.length > 0 ? upcomingEvents.map((event, i) => (
                 <div key={i} className="flex gap-5 group cursor-pointer">
                   <div className="text-center shrink-0 w-14">
                     <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{safeFormat(event.start.dateTime || event.start.date, 'HH:mm')}</p>
@@ -978,7 +971,7 @@ export default function Dashboard() {
 
               {/* Secondary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
-                {events
+                {upcomingEvents
                   .filter(e => e.id !== nextConference.id)
                   .slice(0, 2)
                   .map((meeting, i) => (
