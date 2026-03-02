@@ -286,7 +286,7 @@ export default function Dashboard() {
       if (profile?.google_connected) {
         const [calRes, mailRes, driveRes] = await Promise.all([
           fetch('/api/google/calendar?today=true', { headers }),
-          fetch('/api/google/gmail', { headers }),
+          fetch('/api/google/gmail?unread=true', { headers }),
           fetch('/api/google/drive', { headers })
         ]);
         if (calRes.ok && calRes.headers.get("content-type")?.includes("application/json")) setEvents(await calRes.json());
@@ -342,8 +342,8 @@ export default function Dashboard() {
           }
         } else {
           setGmailError(null);
-          // Update local state to reflect read status
-          setEmails(prev => prev.map(e => e.id === id ? { ...e, unread: false } : e));
+          // Remove from dashboard list as it's no longer "unread"
+          setEmails(prev => prev.filter(e => e.id !== id));
         }
       } else {
         const errData = await res.json().catch(() => ({ error: 'Failed to parse error JSON' }));
