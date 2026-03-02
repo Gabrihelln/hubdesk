@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import { google } from "googleapis";
 import cookieSession from "cookie-session";
 import { createClient } from "@supabase/supabase-js";
@@ -7,7 +6,22 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
-dotenv.config();
+// Dynamic import for Vite to avoid loading it in production
+let createViteServer: any = null;
+if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  try {
+    const viteModule = await import("vite");
+    createViteServer = viteModule.createServer;
+  } catch (e) {
+    console.warn("Vite not found, skipping dev server setup.");
+  }
+}
+
+try {
+  dotenv.config();
+} catch (e) {
+  console.warn("Dotenv config failed (expected in some environments)");
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +33,22 @@ const sanitizeEnv = (val: string | undefined) => {
 
 const app = express();
 const PORT = 3000;
+
+// --- Health Check (Top Level) ---
+app.get("/api/health", (req, res) => {
+  console.log("Health check requested");
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    env: {
+      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
+      hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
+      hasAppUrl: !!process.env.APP_URL,
+      nodeEnv: process.env.NODE_ENV,
+      isVercel: !!process.env.VERCEL
+    }
+  });
+});
 
 // Supabase Setup
 const supabaseUrl = sanitizeEnv(process.env.VITE_SUPABASE_URL);
@@ -56,12 +86,9 @@ const getOAuth2Client = (redirectUri?: string) => {
   const clientSecret = sanitizeEnv(process.env.GOOGLE_CLIENT_SECRET);
   const appUrl = sanitizeEnv(process.env.APP_URL);
 
-  if (!clientId || !clientSecret || !appUrl) {
-    console.warn("MISSING GOOGLE OAUTH CREDENTIALS or APP_URL.", { 
-      hasClientId: !!clientId, 
-      hasClientSecret: !!clientSecret, 
-      appUrl 
-    });
+  if (!clientId || !clientSecret) {
+    console.warn("MISSING GOOGLE OAUTH CREDENTIALS. Google features will be disabled.");
+    return null;
   }
 
   return new google.auth.OAuth2(
@@ -85,18 +112,7 @@ app.use(
 );
 
 // --- Health Check ---
-app.get("/api/health", (req, res) => {
-  console.log("Health check requested");
-  res.json({ 
-    status: "ok", 
-    timestamp: new Date().toISOString(),
-    env: {
-      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
-      hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
-      hasAppUrl: !!process.env.APP_URL
-    }
-  });
-});
+// (Moved to top)
 
 app.get("/api/profile", async (req, res) => {
   console.log("Profile fetch requested");
@@ -225,6 +241,9 @@ app.post("/api/auth/logout", (req, res) => {
 app.get("/api/auth/url", (req, res) => {
   const { userId } = req.query;
   const client = getOAuth2Client();
+  if (!client) {
+    return res.status(500).json({ error: "Google OAuth not configured" });
+  }
   const url = client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
@@ -246,6 +265,11 @@ app.get("/auth/callback", async (req, res) => {
   const { code, state } = req.query; 
   const userId = state as string;
   const client = getOAuth2Client();
+
+  if (!client) {
+    console.error("Google OAuth client not initialized in callback");
+    return res.status(500).send("Authentication failed: Server misconfigured");
+  }
 
   try {
     console.log(`Received callback for user: ${userId}`);
@@ -554,6 +578,7 @@ app.get("/api/google/gmail", async (req, res) => {
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
     const client = getOAuth2Client();
+    if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const gmail = google.gmail({ version: "v1", auth: client });
@@ -612,6 +637,7 @@ app.get("/api/google/gmail/:id", async (req, res) => {
     }
 
     const client = getOAuth2Client();
+    if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const gmail = google.gmail({ version: "v1", auth: client });
@@ -683,6 +709,7 @@ app.post("/api/google/gmail/:id/read", async (req, res) => {
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
     const client = getOAuth2Client();
+    if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const gmail = google.gmail({ version: "v1", auth: client });
@@ -716,6 +743,7 @@ app.get("/api/google/calendar", async (req, res) => {
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
     const client = getOAuth2Client();
+    if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
     
     const calendar = google.calendar({ version: "v3", auth: client });
@@ -743,6 +771,7 @@ app.get("/api/google/drive", async (req, res) => {
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
     const client = getOAuth2Client();
+    if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const drive = google.drive({ version: "v3", auth: client });
@@ -768,13 +797,14 @@ app.use("/api/*", (req, res) => {
 // but we can also proxy them here.
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL && createViteServer) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
+    // Only serve static files if NOT on Vercel (Vercel handles this via vercel.json)
     app.use(express.static(path.resolve(__dirname, "dist")));
     app.get("*", (req, res) => {
       res.sendFile(path.resolve(__dirname, "dist", "index.html"));
