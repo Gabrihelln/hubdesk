@@ -582,10 +582,16 @@ app.get("/api/google/gmail", async (req, res) => {
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const gmail = google.gmail({ version: "v1", auth: client });
+    
+    let q = "label:INBOX category:primary";
+    if (req.query.unread === 'true') {
+      q += " is:unread";
+    }
+
     const response = await gmail.users.messages.list({
       userId: "me",
       maxResults: 50,
-      q: "label:INBOX category:primary",
+      q,
     });
     
     const messages = await Promise.all(
