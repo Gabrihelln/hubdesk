@@ -21,7 +21,13 @@ export default function Calendar() {
         'Authorization': `Bearer ${session.access_token}`,
         'Accept': 'application/json'
       };
-      const res = await fetch('/api/google/calendar', { headers });
+      
+      const monthStart = startOfMonth(currentMonth);
+      const monthEnd = endOfMonth(monthStart);
+      const startDate = startOfWeek(monthStart);
+      const endDate = endOfWeek(monthEnd);
+      
+      const res = await fetch(`/api/google/calendar?timeMin=${startDate.toISOString()}&timeMax=${endDate.toISOString()}`, { headers });
       if (res.ok) setEvents(await res.json());
     } catch (err) {
       console.error(err);
@@ -34,7 +40,7 @@ export default function Calendar() {
     if (profile?.google_connected) {
       fetchEvents();
     }
-  }, [profile?.google_connected]);
+  }, [profile?.google_connected, currentMonth]);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(monthStart);
