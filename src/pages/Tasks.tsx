@@ -75,11 +75,19 @@ export default function Tasks() {
     saveTasks(newTasks);
   };
 
-  const filteredTasks = tasks.filter(t => {
-    if (filter === 'active') return !t.completed;
-    if (filter === 'completed') return t.completed;
-    return true;
-  });
+  const filteredTasks = tasks
+    .filter(t => {
+      if (filter === 'active') return !t.completed;
+      if (filter === 'completed') return t.completed;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.dueDate).getTime();
+      const dateB = new Date(b.dueDate).getTime();
+      if (isNaN(dateA)) return 1;
+      if (isNaN(dateB)) return -1;
+      return dateA - dateB;
+    });
 
   return (
     <div className="h-full flex flex-col bg-card text-card-foreground overflow-hidden">
