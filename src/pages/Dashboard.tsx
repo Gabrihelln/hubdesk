@@ -25,6 +25,7 @@ import {
   FileCode,
   FileVideo,
   FileImage,
+  FileSpreadsheet,
   ChevronLeft,
   ArrowLeft,
   Send,
@@ -116,6 +117,8 @@ export default function Dashboard() {
   const [events, setEvents] = useState<any[]>([]);
   const [emails, setEmails] = useState<any[]>([]);
   const [files, setFiles] = useState<any[]>([]);
+  const [driveSearch, setDriveSearch] = useState('');
+  const [driveFilter, setDriveFilter] = useState<'all' | 'docs' | 'sheets' | 'pdf'>('all');
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [isViewingEmail, setIsViewingEmail] = useState(false);
   const [gmailError, setGmailError] = useState<string | null>(null);
@@ -172,6 +175,7 @@ export default function Dashboard() {
     }
   });
   const [isAddingTask, setIsAddingTask] = useState(false);
+  const [activeTaskTab, setActiveTaskTab] = useState<'recent' | 'completed'>('recent');
   const [newTask, setNewTask] = useState({ title: '', priority: 'Medium', dueDate: format(new Date(), 'yyyy-MM-dd') });
 
   const [notes, setNotes] = useState<any[]>(() => {
@@ -515,6 +519,19 @@ export default function Dashboard() {
     // We'll let the individual handlers handle the database sync for better performance
   };
 
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const dateA = new Date(a.due_date || a.dueDate).getTime();
+    const dateB = new Date(b.due_date || b.dueDate).getTime();
+    if (isNaN(dateA)) return 1;
+    if (isNaN(dateB)) return -1;
+    return dateA - dateB;
+  });
+
+  const filteredTasks = sortedTasks.filter(task => {
+    if (activeTaskTab === 'recent') return !task.completed;
+    return task.completed;
+  });
+
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.title.trim()) return;
@@ -818,6 +835,15 @@ export default function Dashboard() {
 
   const { greetingBase, firstName } = getGreeting();
 
+  const filteredFiles = files.filter(file => {
+    const matchesSearch = file.name.toLowerCase().includes(driveSearch.toLowerCase());
+    if (driveFilter === 'all') return matchesSearch;
+    if (driveFilter === 'docs') return matchesSearch && (file.mimeType?.includes('document') || file.mimeType?.includes('word'));
+    if (driveFilter === 'sheets') return matchesSearch && (file.mimeType?.includes('spreadsheet') || file.mimeType?.includes('excel'));
+    if (driveFilter === 'pdf') return matchesSearch && file.mimeType?.includes('pdf');
+    return matchesSearch;
+  });
+
   return (
     <div className="min-h-full transition-colors duration-300">
       {/* Welcome Section */}
@@ -1069,11 +1095,27 @@ export default function Dashboard() {
           )}
 
           <div className="flex border-b border-slate-100 dark:border-slate-700 mb-6">
-            <button className="px-6 py-3 text-xs font-bold text-blue-600 border-b-2 border-blue-600">Atribuídas Recentemente</button>
-            <button className="px-6 py-3 text-xs font-bold text-slate-400">Prazo Próximo</button>
+            <button 
+              onClick={() => setActiveTaskTab('recent')}
+              className={cn(
+                "px-6 py-3 text-xs font-bold transition-colors",
+                activeTaskTab === 'recent' ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              Atribuídas Recentemente
+            </button>
+            <button 
+              onClick={() => setActiveTaskTab('completed')}
+              className={cn(
+                "px-6 py-3 text-xs font-bold transition-colors",
+                activeTaskTab === 'completed' ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              Tarefas Concluídas
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto space-y-6 scrollbar-thin">
-            {tasks.length > 0 ? tasks.map((task) => (
+            {filteredTasks.length > 0 ? filteredTasks.map((task) => (
               <div key={task.id} className={cn("flex items-center gap-4 group transition-opacity", task.completed && "opacity-50")}>
                 <button 
                   onClick={() => toggleTask(task.id)}
@@ -1265,23 +1307,52 @@ export default function Dashboard() {
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest">Meu Drive</h2>
             </div>
           </div>
-          <div className="px-6 py-3 bg-slate-50/50 dark:bg-slate-700/30 border-y border-slate-100 dark:border-slate-700 flex justify-between items-center">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Itens Compartilhados Recentes</p>
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 cursor-pointer hover:text-slate-600">Todos <ChevronRight className="w-4 h-4" /></div>
+          <div className="px-6 py-3 bg-slate-50/50 dark:bg-slate-700/30 border-y border-slate-100 dark:border-slate-700 flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Itens Recentes</p>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 cursor-pointer hover:text-slate-600">Todos <ChevronRight className="w-4 h-4" /></div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type="text" 
+                  placeholder="Pesquisar arquivos..."
+                  value={driveSearch}
+                  onChange={e => setDriveSearch(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border-none rounded-xl pl-9 pr-4 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {(['all', 'docs', 'sheets', 'pdf'] as const).map((f) => (
+                  <button 
+                    key={f}
+                    onClick={() => setDriveFilter(f)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap",
+                      driveFilter === f ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "bg-white dark:bg-slate-800 text-slate-400 hover:text-slate-600"
+                    )}
+                  >
+                    {f === 'all' ? 'Tudo' : f === 'docs' ? 'Docs' : f === 'sheets' ? 'Sheets' : 'PDFs'}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="flex-1 p-6 overflow-y-auto space-y-5">
             {profile?.google_connected ? (
-              files.length > 0 ? files.map((file, i) => (
+              filteredFiles.length > 0 ? filteredFiles.map((file, i) => (
                 <div key={i} className="flex items-center gap-4 group cursor-pointer">
                   <div className="p-2.5 bg-slate-50 dark:bg-slate-700/50 rounded-xl group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
                     {file.mimeType?.includes('pdf') ? <FileText className="w-5 h-5 text-red-500" /> :
-                     file.mimeType?.includes('word') ? <FileCode className="w-5 h-5 text-blue-500" /> :
+                     (file.mimeType?.includes('spreadsheet') || file.mimeType?.includes('excel')) ? <FileSpreadsheet className="w-5 h-5 text-emerald-500" /> :
+                     (file.mimeType?.includes('document') || file.mimeType?.includes('word')) ? <FileCode className="w-5 h-5 text-blue-500" /> :
                      file.mimeType?.includes('video') ? <FileVideo className="w-5 h-5 text-purple-500" /> :
                      <FileImage className="w-5 h-5 text-emerald-500" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{file.name}</h4>
-                    <p className="text-xs text-slate-400">Compartilhado há 4 minutos</p>
+                    <p className="text-xs text-slate-400">Modificado recentemente</p>
                   </div>
                 </div>
               )) : <p className="text-center text-sm text-slate-400 py-10">Nenhum arquivo encontrado</p>
@@ -1801,7 +1872,7 @@ export default function Dashboard() {
                 </form>
               )}
 
-              {tasks.map((task) => (
+              {sortedTasks.map((task) => (
                 <div key={task.id} className={cn("flex items-center gap-6 p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group", task.completed && "opacity-50")}>
                   <button 
                     onClick={() => toggleTask(task.id)}
