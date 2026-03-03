@@ -151,7 +151,11 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
           viewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {filteredFiles.map((file) => (
-                <div key={file.id} className="bg-card text-card-foreground border border-card-border rounded-3xl p-5 hover:shadow-md transition-all group cursor-pointer relative">
+                <div 
+                  key={file.id} 
+                  onClick={() => window.open(file.webViewLink, '_blank')}
+                  className="bg-card text-card-foreground border border-card-border rounded-3xl p-5 hover:shadow-md transition-all group cursor-pointer relative"
+                >
                   <div className="flex justify-between items-start mb-4">
                     <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-2xl group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
                       {getFileIcon(file.mimeType)}
@@ -167,13 +171,22 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
                   
                   {/* Hover Actions */}
                   <div className="absolute inset-0 bg-white/80 dark:bg-slate-800/80 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                    <button className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-blue-600 transition-colors">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); /* Download logic */ }}
+                      className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-blue-600 transition-colors"
+                    >
                       <Download className="w-5 h-5" />
                     </button>
-                    <button className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-blue-600 transition-colors">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); /* Share logic */ }}
+                      className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-blue-600 transition-colors"
+                    >
                       <Share2 className="w-5 h-5" />
                     </button>
-                    <button className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-red-600 transition-colors">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); /* Delete logic */ }}
+                      className="p-3 bg-white dark:bg-slate-700 rounded-full shadow-sm hover:text-red-600 transition-colors"
+                    >
                       <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
@@ -193,7 +206,11 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
                 </thead>
                 <tbody>
                   {filteredFiles.map((file) => (
-                    <tr key={file.id} className="border-b border-slate-50 dark:border-slate-800 last:border-none hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group cursor-pointer">
+                    <tr 
+                      key={file.id} 
+                      onClick={() => window.open(file.webViewLink, '_blank')}
+                      className="border-b border-slate-50 dark:border-slate-800 last:border-none hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group cursor-pointer"
+                    >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {getFileIcon(file.mimeType)}
@@ -210,9 +227,24 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button className="p-2 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-500"><Download className="w-4 h-4" /></button>
-                          <button className="p-2 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-500"><Share2 className="w-4 h-4" /></button>
-                          <button className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg text-red-500"><Trash2 className="w-4 h-4" /></button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); /* Download */ }}
+                            className="p-2 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-500"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); /* Share */ }}
+                            className="p-2 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-slate-500"
+                          >
+                            <Share2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); /* Delete */ }}
+                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg text-red-500"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
