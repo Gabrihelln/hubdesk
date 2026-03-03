@@ -15,6 +15,8 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'docs' | 'sheets' | 'pdf'>(filter as any);
 
   const fetchFiles = async () => {
     setLoading(true);
@@ -58,6 +60,15 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
     return <File className="w-6 h-6 text-slate-400" />;
   };
 
+  const filteredFiles = files.filter(file => {
+    const matchesSearch = file.name.toLowerCase().includes(searchTerm.toLowerCase());
+    if (activeFilter === 'all') return matchesSearch;
+    if (activeFilter === 'docs') return matchesSearch && (file.mimeType?.includes('document') || file.mimeType?.includes('word'));
+    if (activeFilter === 'sheets') return matchesSearch && (file.mimeType?.includes('spreadsheet') || file.mimeType?.includes('excel'));
+    if (activeFilter === 'pdf') return matchesSearch && file.mimeType?.includes('pdf');
+    return matchesSearch;
+  });
+
   if (!profile?.google_connected) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8 text-center">
@@ -75,19 +86,35 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
   return (
     <div className="h-full flex flex-col bg-card text-card-foreground overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-card-border flex items-center justify-between">
+      <div className="p-6 border-b border-card-border flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{title === 'Drive' ? 'Drive' : title === 'Docs' ? 'Documentos' : title === 'Sheets' ? 'Planilhas' : title}</h1>
           <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded-lg">
-            {files.length} Itens
+            {filteredFiles.length} Itens
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-xl">
+            {(['all', 'docs', 'sheets', 'pdf'] as const).map((f) => (
+              <button 
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={cn(
+                  "px-4 py-1.5 text-xs font-bold rounded-lg transition-all capitalize",
+                  activeFilter === f ? "bg-white dark:bg-slate-700 shadow-sm text-blue-600" : "text-slate-400"
+                )}
+              >
+                {f === 'all' ? 'Tudo' : f === 'docs' ? 'Docs' : f === 'sheets' ? 'Sheets' : 'PDFs'}
+              </button>
+            ))}
+          </div>
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               type="text" 
               placeholder="Pesquisar arquivos..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 w-64"
             />
           </div>
@@ -120,10 +147,10 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
           <div className="h-full flex items-center justify-center">
             <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
           </div>
-        ) : files.length > 0 ? (
+        ) : filteredFiles.length > 0 ? (
           viewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-              {files.map((file) => (
+              {filteredFiles.map((file) => (
                 <div key={file.id} className="bg-card text-card-foreground border border-card-border rounded-3xl p-5 hover:shadow-md transition-all group cursor-pointer relative">
                   <div className="flex justify-between items-start mb-4">
                     <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-2xl group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
@@ -165,7 +192,7 @@ export default function Drive({ filter = 'all', title = 'Drive' }: DriveProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {files.map((file) => (
+                  {filteredFiles.map((file) => (
                     <tr key={file.id} className="border-b border-slate-50 dark:border-slate-800 last:border-none hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group cursor-pointer">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
