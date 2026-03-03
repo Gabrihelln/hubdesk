@@ -801,7 +801,7 @@ app.get("/api/google/drive", async (req, res) => {
     const drive = google.drive({ version: "v3", auth: client });
     const response = await drive.files.list({
       pageSize: 20,
-      fields: "files(id, name, mimeType, modifiedTime, iconLink)",
+      fields: "files(id, name, mimeType, modifiedTime, iconLink, webViewLink)",
       q: "trashed = false",
     });
     res.json(response.data.files);
