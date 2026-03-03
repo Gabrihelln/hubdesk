@@ -1342,7 +1342,13 @@ export default function Dashboard() {
           <div className="flex-1 p-6 overflow-y-auto space-y-5">
             {profile?.google_connected ? (
               filteredFiles.length > 0 ? filteredFiles.map((file, i) => (
-                <div key={i} className="flex items-center gap-4 group cursor-pointer">
+                <a 
+                  key={i} 
+                  href={file.webViewLink} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="flex items-center gap-4 group cursor-pointer"
+                >
                   <div className="p-2.5 bg-slate-50 dark:bg-slate-700/50 rounded-xl group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
                     {file.mimeType?.includes('pdf') ? <FileText className="w-5 h-5 text-red-500" /> :
                      (file.mimeType?.includes('spreadsheet') || file.mimeType?.includes('excel')) ? <FileSpreadsheet className="w-5 h-5 text-emerald-500" /> :
@@ -1351,10 +1357,10 @@ export default function Dashboard() {
                      <FileImage className="w-5 h-5 text-emerald-500" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{file.name}</h4>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-blue-600 transition-colors">{file.name}</h4>
                     <p className="text-xs text-slate-400">Modificado recentemente</p>
                   </div>
-                </div>
+                </a>
               )) : <p className="text-center text-sm text-slate-400 py-10">Nenhum arquivo encontrado</p>
             ) : <ConnectWidget icon={HardDrive} title="Meu Drive" />}
           </div>
