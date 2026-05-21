@@ -34,7 +34,11 @@ import {
   Link,
   ExternalLink,
   Trash2,
-  Edit2
+  Edit2,
+  Eye,
+  EyeOff,
+  Copy,
+  Key
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -55,6 +59,7 @@ const defaultLayout = [
   { i: 'drive', x: 8, y: 14, w: 4, h: 10, minW: 2, minH: 4 },
   { i: 'tasks', x: 0, y: 10, w: 4, h: 12, minW: 2, minH: 6 },
   { i: 'quick-notes', x: 4, y: 14, w: 4, h: 8, minW: 2, minH: 4 },
+  { i: 'passwords', x: 0, y: 22, w: 4, h: 10, minW: 2, minH: 4 },
 ];
 
 const smLayout = [
@@ -66,6 +71,7 @@ const smLayout = [
   { i: 'drive', x: 0, y: 24, w: 6, h: 10, minW: 2, minH: 4 },
   { i: 'tasks', x: 0, y: 34, w: 6, h: 12, minW: 2, minH: 6 },
   { i: 'quick-notes', x: 0, y: 46, w: 6, h: 8, minW: 2, minH: 4 },
+  { i: 'passwords', x: 0, y: 54, w: 6, h: 10, minW: 2, minH: 4 },
 ];
 
 const xsLayout = [
@@ -77,6 +83,7 @@ const xsLayout = [
   { i: 'drive', x: 0, y: 38, w: 4, h: 10, minW: 2, minH: 4 },
   { i: 'tasks', x: 0, y: 48, w: 4, h: 12, minW: 2, minH: 6 },
   { i: 'quick-notes', x: 0, y: 60, w: 4, h: 8, minW: 2, minH: 4 },
+  { i: 'passwords', x: 0, y: 68, w: 4, h: 10, minW: 2, minH: 4 },
 ];
 
 const xxsLayout = [
@@ -88,6 +95,7 @@ const xxsLayout = [
   { i: 'drive', x: 0, y: 44, w: 2, h: 10, minW: 1, minH: 4 },
   { i: 'tasks', x: 0, y: 54, w: 2, h: 12, minW: 1, minH: 6 },
   { i: 'quick-notes', x: 0, y: 66, w: 2, h: 8, minW: 1, minH: 4 },
+  { i: 'passwords', x: 0, y: 74, w: 2, h: 10, minW: 1, minH: 4 },
 ];
 
 export default function Dashboard() {
@@ -206,6 +214,13 @@ export default function Dashboard() {
   const [isAddingLink, setIsAddingLink] = useState(false);
   const [newLink, setNewLink] = useState({ title: '', url: '' });
 
+  const [passwords, setPasswords] = useState<any[]>([]);
+  const [isAddingPassword, setIsAddingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState({ site: '', login: '', password: '' });
+  const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
+  
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+
   const [hasLoadedLayout, setHasLoadedLayout] = useState(false);
 
   const [layouts, setLayouts] = useState<any>(() => {
@@ -275,17 +290,19 @@ export default function Dashboard() {
         'Accept': 'application/json'
       };
 
-      const [weatherRes, tasksRes, notesRes, linksRes] = await Promise.all([
+      const [weatherRes, tasksRes, notesRes, linksRes, passRes] = await Promise.all([
         fetch(`/api/weather?city=${encodeURIComponent(profile?.city || 'São Luís')}`, { headers }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
         supabase.from('notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('quick_links').select('*').order('created_at', { ascending: false })
+        supabase.from('quick_links').select('*').order('created_at', { ascending: false }),
+        fetch('/api/passwords', { headers })
       ]);
 
       if (weatherRes.ok && weatherRes.headers.get("content-type")?.includes("application/json")) setWeather(await weatherRes.json());
       if (tasksRes.data) setTasks(tasksRes.data);
       if (notesRes.data) setNotes(notesRes.data);
       if (linksRes.data) setQuickLinks(linksRes.data);
+      if (passRes.ok) setPasswords(await passRes.json());
 
       if (profile?.google_connected) {
         const [calRes, mailRes, driveRes] = await Promise.all([
@@ -293,9 +310,39 @@ export default function Dashboard() {
           fetch('/api/google/gmail?unread=true', { headers }),
           fetch('/api/google/drive', { headers })
         ]);
-        if (calRes.ok && calRes.headers.get("content-type")?.includes("application/json")) setEvents(await calRes.json());
-        if (mailRes.ok && mailRes.headers.get("content-type")?.includes("application/json")) setEmails(await mailRes.json());
-        if (driveRes.ok && driveRes.headers.get("content-type")?.includes("application/json")) setFiles(await driveRes.json());
+        
+        // Handle token expiration / invalid_grant
+        const checkGoogleAuthError = async (res: Response) => {
+          if (res.status === 401) {
+            const data = await res.json().catch(() => ({}));
+            if (data.code === 'GOOGLE_INVALID_GRANT') {
+              console.warn("Google credentials expired, prompting re-connect");
+              setGoogleAuthError(data.message || "Sua conexão expirou. Reconecte o Google.");
+            }
+          }
+          return res;
+        };
+
+        if (calRes.ok && calRes.headers.get("content-type")?.includes("application/json")) {
+          setEvents(await calRes.json());
+          setGoogleAuthError(null);
+        } else {
+          await checkGoogleAuthError(calRes);
+        }
+
+        if (mailRes.ok && mailRes.headers.get("content-type")?.includes("application/json")) {
+          setEmails(await mailRes.json());
+          setGoogleAuthError(null);
+        } else {
+          await checkGoogleAuthError(mailRes);
+        }
+
+        if (driveRes.ok && driveRes.headers.get("content-type")?.includes("application/json")) {
+          setFiles(await driveRes.json());
+          setGoogleAuthError(null);
+        } else {
+          await checkGoogleAuthError(driveRes);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -480,6 +527,63 @@ export default function Dashboard() {
         console.error("Error saving layout:", err);
       }
     }, 1000);
+  };
+
+  const handleAddPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword.site || !newPassword.login || !newPassword.password) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch('/api/passwords', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(newPassword)
+      });
+      if (res.ok) {
+        const { entry } = await res.json();
+        setPasswords([...passwords, entry]);
+        setNewPassword({ site: '', login: '', password: '' });
+        setIsAddingPassword(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeletePassword = async (id: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(`/api/passwords/${id}`, {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+      if (res.ok) {
+        setPasswords(passwords.filter(p => p.id !== id));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const togglePasswordVisibility = (id: string) => {
+    setVisiblePasswords(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // You could add a toast here
   };
 
   const handleCitySubmit = async (city: string) => {
@@ -784,13 +888,39 @@ export default function Dashboard() {
     }
   };
 
-  const ConnectWidget = ({ icon: Icon, title }: { icon: any, title: string }) => (
-    <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-3">
-      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
-        <Icon className="w-5 h-5" />
+  const ConnectWidget = ({ icon: Icon, title, isError }: { icon: any, title: string, isError?: boolean }) => (
+    <div className={cn(
+      "flex flex-col items-center justify-center h-full p-6 text-center space-y-3 transition-colors",
+      isError && "bg-red-50/30 dark:bg-red-900/10"
+    )}>
+      <div className={cn(
+        "w-10 h-10 rounded-xl flex items-center justify-center",
+        isError ? "bg-red-50 text-red-500" : "bg-blue-50 text-blue-600"
+      )}>
+        {isError ? <Key className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
       </div>
-      <p className="text-xs font-medium text-slate-500">Conecte sua conta Google para ver {title}</p>
-      <button onClick={connectGoogle} className="text-xs font-bold text-blue-600 hover:underline">Conectar Agora</button>
+      <p className={cn("text-xs font-medium", isError ? "text-red-600" : "text-slate-500")}>
+        {isError ? googleAuthError : `Conecte sua conta Google para ver ${title}`}
+      </p>
+      <div className="flex flex-col gap-2">
+        <button 
+          onClick={connectGoogle} 
+          className={cn(
+            "text-xs font-bold transition-all hover:scale-105 active:scale-95",
+            isError ? "text-red-600 px-4 py-2 bg-red-100 rounded-lg" : "text-blue-600 hover:underline"
+          )}
+        >
+          {isError ? "Reconectar" : "Conectar Agora"}
+        </button>
+        {isError && (
+          <button 
+            onClick={disconnectGoogle} 
+            className="text-[10px] text-slate-400 hover:text-slate-600"
+          >
+            Remover Conexão
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -1362,7 +1492,113 @@ export default function Dashboard() {
                   </div>
                 </a>
               )) : <p className="text-center text-sm text-slate-400 py-10">Nenhum arquivo encontrado</p>
-            ) : <ConnectWidget icon={HardDrive} title="Meu Drive" />}
+            ) : <ConnectWidget icon={HardDrive} title="Meu Drive" isError={!!googleAuthError} />}
+          </div>
+        </div>
+
+        {/* PASSWORD MANAGER */}
+        <div key="passwords" className="bg-card text-card-foreground rounded-3xl border border-card-border shadow-sm overflow-hidden flex flex-col transition-colors">
+          <div className={cn("p-6 flex items-center justify-between", isDraggable && "drag-handle cursor-move bg-slate-50/50 dark:bg-slate-700/50")}>
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center">
+                <Key className="w-5 h-5" />
+              </div>
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest">Senhas</h2>
+            </div>
+            <button 
+              onClick={() => setIsAddingPassword(!isAddingPassword)}
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 p-6 overflow-y-auto scrollbar-thin">
+            {isAddingPassword && (
+              <form onSubmit={handleAddPassword} className="mb-6 p-4 bg-slate-50 dark:bg-slate-700/30 rounded-2xl border border-slate-100 dark:border-slate-700 space-y-3">
+                <input 
+                  autoFocus
+                  type="text" 
+                  placeholder="Nome do site"
+                  value={newPassword.site}
+                  onChange={e => setNewPassword({ ...newPassword, site: e.target.value })}
+                  className="w-full bg-white dark:bg-slate-800 border-none rounded-xl px-4 py-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                  required
+                />
+                <input 
+                  type="text" 
+                  placeholder="Login / E-mail"
+                  value={newPassword.login}
+                  onChange={e => setNewPassword({ ...newPassword, login: e.target.value })}
+                  className="w-full bg-white dark:bg-slate-800 border-none rounded-xl px-4 py-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                  required
+                />
+                <input 
+                  type="password" 
+                  placeholder="Senha"
+                  value={newPassword.password}
+                  onChange={e => setNewPassword({ ...newPassword, password: e.target.value })}
+                  className="w-full bg-white dark:bg-slate-800 border-none rounded-xl px-4 py-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                  required
+                />
+                <div className="flex gap-2">
+                  <button type="submit" className="flex-1 bg-emerald-600 text-white rounded-xl py-2 text-xs font-bold hover:bg-emerald-700 transition-colors">
+                    Salvar
+                  </button>
+                  <button type="button" onClick={() => setIsAddingPassword(false)} className="flex-1 bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl py-2 text-xs font-bold hover:bg-slate-300 transition-colors">
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="space-y-2">
+              {passwords.length > 0 ? passwords.map((p) => (
+                <div key={p.id} className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-100 dark:border-slate-800 hover:border-emerald-200 dark:hover:border-emerald-900/30 transition-all group">
+                  <div className="flex-1 grid grid-cols-2 gap-4 min-w-0 items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest truncate">{p.site}</span>
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">{p.login}</span>
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex items-center justify-between bg-white dark:bg-slate-900 rounded-xl px-2.5 py-1.5 border border-slate-100 dark:border-slate-800 shadow-sm">
+                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400 truncate mr-2">
+                        {visiblePasswords.has(p.id) ? p.password : '••••••••'}
+                      </span>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                         <button 
+                           onClick={() => togglePasswordVisibility(p.id)} 
+                           className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+                           title={visiblePasswords.has(p.id) ? "Ocultar" : "Mostrar"}
+                         >
+                           {visiblePasswords.has(p.id) ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                         </button>
+                         <button 
+                           onClick={() => copyToClipboard(p.password)} 
+                           className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+                           title="Copiar senha"
+                         >
+                           <Copy className="w-3.5 h-3.5" />
+                         </button>
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => handleDeletePassword(p.id)}
+                    className="ml-3 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                    title="Excluir"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )) : (
+                <div className="text-center py-10">
+                  <Key className="w-8 h-8 text-slate-200 dark:text-slate-800 mx-auto mb-2 opacity-50" />
+                  <p className="text-xs text-slate-400">Nenhuma senha salva</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
