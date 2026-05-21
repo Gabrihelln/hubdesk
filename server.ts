@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
 
 // Dynamic import for Vite to avoid loading it in production
 let createViteServer: any = null;
@@ -81,24 +82,58 @@ console.log("Server initializing...", {
 });
 
 // Google OAuth Setup
-const getOAuth2Client = (redirectUri?: string) => {
+const getOAuth2Client = (redirectUri?: string, req?: express.Request) => {
   const clientId = sanitizeEnv(process.env.GOOGLE_CLIENT_ID);
   const clientSecret = sanitizeEnv(process.env.GOOGLE_CLIENT_SECRET);
-  const appUrl = sanitizeEnv(process.env.APP_URL);
+  // Try to determine appUrl from request if not in env
+  let appUrl = sanitizeEnv(process.env.APP_URL);
+  
+  if (!appUrl && req) {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers.host;
+    appUrl = `${protocol}://${host}`;
+    console.log(`[AUTH] Determined appUrl from request: ${appUrl}`);
+  }
 
   if (!clientId || !clientSecret) {
     console.warn("MISSING GOOGLE OAUTH CREDENTIALS. Google features will be disabled.");
     return null;
   }
 
+  const finalRedirectUri = redirectUri || (appUrl ? `${appUrl}/auth/callback` : undefined);
+  console.log(`[AUTH] Creating OAuth2 client with redirectUri: ${finalRedirectUri}`);
+
   return new google.auth.OAuth2(
     clientId,
     clientSecret,
-    redirectUri || (appUrl ? `${appUrl}/auth/callback` : undefined)
+    finalRedirectUri
   );
 };
 
 const oauth2Client = getOAuth2Client();
+
+// Encryption Helpers
+const ENCRYPTION_KEY = sanitizeEnv(process.env.ENCRYPTION_SECRET) || sanitizeEnv(process.env.SESSION_SECRET) || "default-secret-key-32-chars-long-";
+// Ensure key is 32 bytes
+const cipherKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+
+function encrypt(text: string) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', cipherKey, iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decrypt(text: string) {
+  const textParts = text.split(':');
+  const iv = Buffer.from(textParts.shift()!, 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', cipherKey, iv);
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+}
 
 app.use(express.json());
 app.use(
@@ -240,7 +275,7 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.get("/api/auth/url", (req, res) => {
   const { userId } = req.query;
-  const client = getOAuth2Client();
+  const client = getOAuth2Client(undefined, req);
   if (!client) {
     return res.status(500).json({ error: "Google OAuth not configured" });
   }
@@ -264,7 +299,7 @@ app.get("/api/auth/url", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
   const { code, state } = req.query; 
   const userId = state as string;
-  const client = getOAuth2Client();
+  const client = getOAuth2Client(undefined, req);
 
   if (!client) {
     console.error("Google OAuth client not initialized in callback");
@@ -373,6 +408,124 @@ app.post("/api/profile/metadata", async (req, res) => {
     res.json({ success: true });
   } catch (error: any) {
     console.error("Error updating metadata:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/passwords", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: "No authorization header" });
+
+  try {
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const savedPasswordsRaw = user.user_metadata?.dashboard_passwords;
+    let passwords = [];
+
+    if (savedPasswordsRaw) {
+      const parsed = typeof savedPasswordsRaw === 'string' ? JSON.parse(savedPasswordsRaw) : savedPasswordsRaw;
+      passwords = parsed.map((p: any) => {
+        try {
+          return {
+            ...p,
+            password: decrypt(p.password)
+          };
+        } catch (e) {
+          console.error("Failed to decrypt password", p.site);
+          return p;
+        }
+      });
+    }
+
+    res.json(passwords);
+  } catch (error: any) {
+    console.error("Error fetching passwords:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/passwords", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: "No authorization header" });
+
+  try {
+    const newPassword = req.body; // { site, login, password, id? }
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const currentPasswordsRaw = user.user_metadata?.dashboard_passwords;
+    let currentPasswords = [];
+    if (currentPasswordsRaw) {
+      currentPasswords = typeof currentPasswordsRaw === 'string' ? JSON.parse(currentPasswordsRaw) : currentPasswordsRaw;
+    }
+
+    // Encrypt the new password
+    const encryptedPassword = encrypt(newPassword.password);
+    
+    const entryToSave = {
+      id: newPassword.id || Date.now().toString(),
+      site: newPassword.site,
+      login: newPassword.login,
+      password: encryptedPassword,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedPasswords = [...currentPasswords, entryToSave];
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      user.id,
+      { user_metadata: { ...user.user_metadata, dashboard_passwords: updatedPasswords } }
+    );
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, entry: { ...entryToSave, password: newPassword.password } });
+  } catch (error: any) {
+    console.error("Error saving password:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete("/api/passwords/:id", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: "No authorization header" });
+
+  try {
+    const { id } = req.params;
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const currentPasswordsRaw = user.user_metadata?.dashboard_passwords;
+    let currentPasswords = [];
+    if (currentPasswordsRaw) {
+      currentPasswords = typeof currentPasswordsRaw === 'string' ? JSON.parse(currentPasswordsRaw) : currentPasswordsRaw;
+    }
+
+    const updatedPasswords = currentPasswords.filter((p: any) => p.id !== id);
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      user.id,
+      { user_metadata: { ...user.user_metadata, dashboard_passwords: updatedPasswords } }
+    );
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error deleting password:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -569,6 +722,24 @@ const getGoogleUser = async (req: express.Request) => {
   return user;
 };
 
+const handleGoogleError = (error: any, res: express.Response, prefix: string) => {
+  console.error(`${prefix} error details:`, error.response?.data || error);
+  const errorMessage = error.response?.data?.error || error.message || "Unknown error";
+  
+  if (errorMessage === "invalid_grant" || 
+      (error.response?.status === 400 && errorMessage === "invalid_grant") || 
+      (error.response?.data?.error === "invalid_grant")) {
+    console.warn(`${prefix} Token is invalid or expired (invalid_grant). User needs to reconnect.`);
+    return res.status(401).json({ 
+      error: "Google connection expired", 
+      code: "GOOGLE_INVALID_GRANT",
+      message: "Sua conexão com o Google expirou. Por favor, desconecte e conecte novamente no card do Drive ou Agenda." 
+    });
+  }
+  
+  res.status(500).json({ error: errorMessage });
+};
+
 app.get("/api/google/gmail", async (req, res) => {
   try {
     const user = await getGoogleUser(req);
@@ -577,8 +748,12 @@ app.get("/api/google/gmail", async (req, res) => {
     const { data } = await supabase.from("users").select("google_refresh_token").eq("id", user.id).single();
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
-    const client = getOAuth2Client();
+    const client = getOAuth2Client(undefined, req);
     if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
+    
+    // Log token hint for debugging
+    console.log(`[GMAIL] Using refresh token starting with: ${data.google_refresh_token.substring(0, 5)}... (Total length: ${data.google_refresh_token.length})`);
+    
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
     const gmail = google.gmail({ version: "v1", auth: client });
@@ -615,8 +790,7 @@ app.get("/api/google/gmail", async (req, res) => {
     );
     res.json(messages.filter(m => m !== null));
   } catch (error: any) {
-    console.error("Gmail fetch error:", error);
-    res.status(500).json({ error: error.message || "Unknown error" });
+    handleGoogleError(error, res, "[GMAIL]");
   }
 });
 
@@ -642,7 +816,7 @@ app.get("/api/google/gmail/:id", async (req, res) => {
       return res.status(400).json({ error: "Google not connected" });
     }
 
-    const client = getOAuth2Client();
+    const client = getOAuth2Client(undefined, req);
     if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
@@ -701,8 +875,7 @@ app.get("/api/google/gmail/:id", async (req, res) => {
       body
     });
   } catch (error: any) {
-    console.error(`Gmail detail error for ID ${req.params.id}:`, error);
-    res.status(500).json({ error: error.message });
+    handleGoogleError(error, res, "[GMAIL DETAIL]");
   }
 });
 
@@ -714,7 +887,7 @@ app.post("/api/google/gmail/:id/read", async (req, res) => {
     const { data } = await supabase.from("users").select("google_refresh_token").eq("id", user.id).single();
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
-    const client = getOAuth2Client();
+    const client = getOAuth2Client(undefined, req);
     if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
@@ -729,14 +902,7 @@ app.post("/api/google/gmail/:id/read", async (req, res) => {
 
     res.json({ success: true });
   } catch (error: any) {
-    console.error("Gmail mark as read error:", error);
-    if (error.code === 403 || error.message?.includes('insufficient authentication scopes')) {
-      return res.status(403).json({ 
-        error: "Permissões insuficientes. Por favor, reconecte sua conta do Google para autorizar a marcação de e-mails como lidos.",
-        code: "INSUFFICIENT_SCOPES"
-      });
-    }
-    res.status(500).json({ error: error.message });
+    handleGoogleError(error, res, "[GMAIL READ]");
   }
 });
 
@@ -748,7 +914,7 @@ app.get("/api/google/calendar", async (req, res) => {
     const { data } = await supabase.from("users").select("google_refresh_token").eq("id", user.id).single();
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
-    const client = getOAuth2Client();
+    const client = getOAuth2Client(undefined, req);
     if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
     
@@ -781,8 +947,7 @@ app.get("/api/google/calendar", async (req, res) => {
     } as any);
     res.json(response.data.items);
   } catch (error: any) {
-    console.error("Calendar fetch error:", error);
-    res.status(500).json({ error: error.message });
+    handleGoogleError(error, res, "[CALENDAR]");
   }
 });
 
@@ -794,7 +959,7 @@ app.get("/api/google/drive", async (req, res) => {
     const { data } = await supabase.from("users").select("google_refresh_token").eq("id", user.id).single();
     if (!data?.google_refresh_token) return res.status(400).json({ error: "Google not connected" });
 
-    const client = getOAuth2Client();
+    const client = getOAuth2Client(undefined, req);
     if (!client) return res.status(500).json({ error: "Google OAuth not configured" });
     client.setCredentials({ refresh_token: data.google_refresh_token });
 
@@ -807,8 +972,7 @@ app.get("/api/google/drive", async (req, res) => {
     });
     res.json(response.data.files);
   } catch (error: any) {
-    console.error("Drive fetch error:", error);
-    res.status(500).json({ error: error.message || "Unknown error" });
+    handleGoogleError(error, res, "[DRIVE]");
   }
 });
 
